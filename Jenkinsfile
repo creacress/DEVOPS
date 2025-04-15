@@ -2,16 +2,12 @@ pipeline {
     agent any
 
     environment {
-        CONTAINER_ID = ''
         SUM_PY_PATH = './sum.py'
         DIR_PATH = '.'
         TEST_FILE_PATH = './test_variables.txt'
-        DOCKERHUB_USERNAME = credentials('dockerhub-username')
-        DOCKERHUB_PASSWORD = credentials('dockerhub-password')
     }
 
     stages {
-
         stage('Build') {
             steps {
                 echo '🔨 Build Docker image...'
@@ -23,9 +19,9 @@ pipeline {
             steps {
                 echo '🚀 Run Docker container...'
                 script {
-                    def output = sh(script: "docker run -dit sum-image", returnStdout: true)
-                    CONTAINER_ID = output.trim()
-                    echo "Container ID: ${CONTAINER_ID}"
+                    // CONTAINER_ID déclaré ici, accessible partout
+                    env.CONTAINER_ID = sh(script: "docker run -dit sum-image", returnStdout: true).trim()
+                    echo "Container ID: ${env.CONTAINER_ID}"
                 }
             }
         }
@@ -34,14 +30,14 @@ pipeline {
             steps {
                 echo '✅ Run Tests...'
                 script {
-                    def testLines = readFile("${TEST_FILE_PATH}").split('\n')
+                    def testLines = readFile("${env.TEST_FILE_PATH}").split('\n')
                     for (line in testLines) {
                         def vars = line.trim().split(' ')
                         def arg1 = vars[0]
                         def arg2 = vars[1]
                         def expectedSum = vars[2].toFloat()
 
-                        def output = sh(script: "docker exec ${CONTAINER_ID} python sum.py ${arg1} ${arg2}", returnStdout: true)
+                        def output = sh(script: "docker exec ${env.CONTAINER_ID} python sum.py ${arg1} ${arg2}", returnStdout: true)
                         def result = output.split('\n')[-1].trim().toFloat()
 
                         if (result == expectedSum) {
@@ -57,9 +53,13 @@ pipeline {
         stage('Deploy') {
             steps {
                 echo '📦 Push to DockerHub...'
-                sh "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
-                sh "docker tag sum-image ${DOCKERHUB_USERNAME}/sum-image"
-                sh "docker push ${DOCKERHUB_USERNAME}/sum-image"
+                withCredentials([
+                    usernamePassword(credentialsId: 'dockerhub-username', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')
+                ]) {
+                    sh "docker login -u $USERNAME -p $PASSWORD"
+                    sh "docker tag sum-image $USERNAME/sum-image"
+                    sh "docker push $USERNAME/sum-image"
+                }
             }
         }
     }
@@ -67,8 +67,8 @@ pipeline {
     post {
         always {
             echo '🧹 Cleanup...'
-            sh "docker stop ${CONTAINER_ID} || true"
-            sh "docker rm ${CONTAINER_ID} || true"
+            sh "docker stop ${env.CONTAINER_ID} || true"
+            sh "docker rm ${env.CONTAINER_ID} || true"
         }
     }
 }
